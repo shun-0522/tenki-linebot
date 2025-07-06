@@ -1,54 +1,25 @@
-from flask import Flask, request
-from linebot import LineBotApi, WebhookHandler
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from linebot.exceptions import InvalidSignatureError
-from dotenv import load_dotenv
 import os
 import requests
+from flask import Flask, request, abort
+from linebot import LineBotApi, WebhookHandler
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from datetime import datetime, timezone, timedelta
 
-# .env 読み込み
-load_dotenv()
-
-# 環境変数の読み込み
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
-API_KEY = os.getenv("OPENWEATHER_API_KEY")
-
-# デバッグ用：環境変数出力
-print("アクセストークン:", LINE_CHANNEL_ACCESS_TOKEN)
-print("チャネルシークレット:", LINE_CHANNEL_SECRET)
-print("天気APIキー:", API_KEY)
-
 app = Flask(__name__)
+
+# ← ここに書く
+API_KEY = os.environ.get("OPENWEATHER_API_KEY")
+LAT = "35.6895"   # 東京の例
+LON = "139.6917"
+
+print("取得したAPI_KEY:", API_KEY)
+
+# LINE Bot 設定
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
-
-# 東京の緯度・経度
-LAT = 35.682839
-LON = 139.759455
-
-@app.route("/")
-def index():
-    return "LINE Bot is running!"
-
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers.get('X-Line-Signature', '')
-    body = request.get_data(as_text=True)
-    app.logger.info("Request body: " + body)
-    print("★★ body 内容:", body, flush=True)
-
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        print("署名エラーです", flush=True)
-        return 'Invalid signature. Please check your channel access token/channel secret.', 400
-    except Exception as e:
-        print(f"その他の例外発生: {e}", flush=True)
-        return 'Error', 500
-
-    return 'OK', 200
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -56,11 +27,14 @@ def handle_message(event):
 
     if "天気" in user_message:
         url = (
-            f"https://api.openweathermap.org/data/3.0/onecall?"
+            f"https://api.openweathermap.org/data/2.5/onecall?"
             f"lat={LAT}&lon={LON}&appid={API_KEY}&units=metric&lang=ja"
         )
 
         response = requests.get(url)
+        print("URL:", url)
+        print("ステータスコード:", response.status_code)
+        print("レスポンス:", response.text)
 
         if response.status_code == 200:
             data = response.json()
@@ -97,3 +71,4 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
