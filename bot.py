@@ -12,6 +12,7 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 API_KEY = os.environ.get("WEATHER_API_KEY")
+print(f"現在のAPI_KEY: {API_KEY}", flush=True)
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
@@ -79,8 +80,10 @@ def handle_message(event):
             forecast_texts = []
             for item in forecasts:
                 dt_txt = item["dt_txt"]  # 例: "2025-07-06 15:00:00"
-                dt_jst = datetime.strptime(dt_txt, "%Y-%m-%d %H:%M:%S") + timedelta(hours=9-forecast_data["city"]["timezone"]//3600)
+                dt_utc = datetime.strptime(dt_txt, "%Y-%m-%d %H:%M:%S")  # UTC時間としてパース
+                dt_jst = dt_utc + timedelta(seconds=forecast_data["city"]["timezone"])  # JSTに変換（秒単位）
                 time_str = dt_jst.strftime("%m/%d %H:%M")
+
 
                 temp = item["main"]["temp"]
                 weather_desc = item["weather"][0]["description"]
