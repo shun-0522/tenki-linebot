@@ -1,30 +1,22 @@
-from flask import Flask, request
-from linebot import LineBotApi, WebhookHandler
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from linebot.exceptions import InvalidSignatureError
-from dotenv import load_dotenv
 import os
 import requests
+from flask import Flask, request, abort
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from datetime import datetime, timezone, timedelta
 
-# .env 読み込み
-load_dotenv()
-
-# 環境変数の読み込み
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
-API_KEY = os.getenv("OPENWEATHER_API_KEY")
-
-# デバッグ用：環境変数出力
-print("アクセストークン:", LINE_CHANNEL_ACCESS_TOKEN)
-print("チャネルシークレット:", LINE_CHANNEL_SECRET)
-print("天気APIキー:", API_KEY)
-
 app = Flask(__name__)
+
+# 環境変数からキーを取得（Herokuなどの環境を想定）
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
+API_KEY = os.environ.get("WEATHER_API_KEY")
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# 東京の緯度・経度
+# 東京駅の座標例
 LAT = 35.682839
 LON = 139.759455
 
@@ -55,34 +47,52 @@ def handle_message(event):
     user_message = event.message.text.strip().replace(" ", "").lower()
 
     if "天気" in user_message:
-        url = (
-            f"https://api.openweathermap.org/data/2.5/onecall?"
+        ### 現在の天気（Current Weather API）
+        current_url = (
+            f"https://api.openweathermap.org/data/2.5/weather?"
             f"lat={LAT}&lon={LON}&appid={API_KEY}&units=metric&lang=ja"
         )
+        current_res = requests.get(current_url)
 
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            current = data["current"]
-            current_weather = current["weather"][0]["description"]
-            current_temp = current["temp"]
-
-            hourly_forecasts = data["hourly"][:5]
-            hourly_texts = []
-            for h in hourly_forecasts:
-                dt = h["dt"]
-                temp = h["temp"]
-                weather_desc = h["weather"][0]["description"]
-                dt_jst = datetime.fromtimestamp(dt, tz=timezone.utc) + timedelta(hours=9)
-                time_str = dt_jst.strftime("%H:%M")
-                hourly_texts.append(f"{time_str}: {weather_desc}, {temp}℃")
-
-            hourly_info = "\n".join(hourly_texts)
-
-            reply_text = f"【現在の天気】\n{current_weather}、{current_temp}℃\n\n【1時間ごとの予報】\n{hourly_info}"
+        if current_res.status_code == 200:
+            current_data = current_res.json()
+            current_weather = current_data["weather"][0]["description"]
+            current_temp = current_data["main"]["temp"]
         else:
-            reply_text = "天気情報の取得に失敗しました。"
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="現在の天気情報の取得に失敗しました。")
+            )
+            return
+
+        ### 予報（5日間/3時間ごと Forecast API）
+        forecast_url = (
+            f"https://api.openweathermap.org/data/2.5/forecast?"
+            f"lat={LAT}&lon={LON}&appid={API_KEY}&units=metric&lang=ja"
+        )
+        forecast_res = requests.get(forecast_url)
+
+        if forecast_res.status_code == 200:
+            forecast_data = forecast_res.json()
+            forecasts = forecast_data["list"][:5]  # 直近5件（3時間ごと × 5 = 15時間分）
+
+            forecast_texts = []
+            for item in forecasts:
+                dt_txt = item["dt_txt"]  # 例: "2025-07-06 15:00:00"
+                dt_jst = datetime.strptime(dt_txt, "%Y-%m-%d %H:%M:%S") + timedelta(hours=9-forecast_data["city"]["timezone"]//3600)
+                time_str = dt_jst.strftime("%m/%d %H:%M")
+
+                temp = item["main"]["temp"]
+                weather_desc = item["weather"][0]["description"]
+
+                forecast_texts.append(f"{time_str}: {weather_desc}, {temp}℃")
+
+            hourly_info = "\n".join(forecast_texts)
+
+            reply_text = f"【現在の天気】\n{current_weather}、{current_temp}℃\n\n【3時間ごとの予報】\n{hourly_info}"
+
+        else:
+            reply_text = "天気予報の取得に失敗しました。"
 
         line_bot_api.reply_message(
             event.reply_token,
